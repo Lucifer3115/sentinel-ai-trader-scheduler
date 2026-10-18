@@ -1,0 +1,52 @@
+
+name: Sentinel AI Paper Trading Scheduler
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sentinel-paper-trading
+  cancel-in-progress: false
+
+jobs:
+  paper-trading:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Invoke Base44 paper-trading function
+        env:
+          BASE44_TOKEN: ${{ secrets.BASE44_TOKEN }}
+          SCHEDULER_SECRET: ${{ secrets.SCHEDULER_SECRET }}
+          BASE44_FUNCTION_URL: ${{ secrets.BASE44_FUNCTION_URL }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          url = os.environ["BASE44_FUNCTION_URL"]
+          if not url.startswith("https://"):
+              raise ValueError("HTTPS endpoint required")
+
+          payload = json.dumps({
+              "scheduler_secret": os.environ["SCHEDULER_SECRET"]
+          }).encode("utf-8")
+
+          request = urllib.request.Request(
+              url,
+              data=payload,
+              headers={
+                  "Authorization": "Bearer " + os.environ["BASE44_TOKEN"],
+                  "Content-Type": "application/json"
+              },
+              method="POST"
+          )
+
+          with urllib.request.urlopen(request, timeout=60) as response:
+              print("HTTP status:", response.status)
+              print("Request completed; inspect Base44 diagnostics.")
+          PY
