@@ -13,40 +13,85 @@ concurrency:
 
 jobs:
   paper-trading:
+    name: Run Sentinel Paper Trading
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:
       - name: Invoke Base44 paper-trading function
         env:
-          BASE44_TOKEN: ${{ secrets.BASE44_TOKEN }}
           SCHEDULER_SECRET: ${{ secrets.SCHEDULER_SECRET }}
           BASE44_FUNCTION_URL: ${{ secrets.BASE44_FUNCTION_URL }}
+
         run: |
           python3 - <<'PY'
           import json
           import os
+          import sys
           import urllib.request
+          import urllib.error
 
           url = os.environ["BASE44_FUNCTION_URL"]
+          secret = os.environ["SCHEDULER_SECRET"]
+
           if not url.startswith("https://"):
               raise ValueError("HTTPS endpoint required")
 
+          if not secret:
+              raise ValueError("SCHEDULER_SECRET is missing")
+
           payload = json.dumps({
-              "scheduler_secret": os.environ["SCHEDULER_SECRET"]
+              "scheduler_secret": secret
           }).encode("utf-8")
 
           request = urllib.request.Request(
               url,
               data=payload,
               headers={
-                  "Authorization": "Bearer " + os.environ["BASE44_TOKEN"],
-                  "Content-Type": "application/json"
+                  "Content-Type": "application/json",
+                  "Accept": "application/json"
               },
               method="POST"
           )
 
-          with urllib.request.urlopen(request, timeout=60) as response:
-              print("HTTP status:", response.status)
-              print("Request completed; inspect Base44 diagnostics.")
+          try:
+              with urllib.request.urlopen(
+                  request, timeout=60
+              ) as response:
+                  status_code = response.status
+                  body = response.read().decode("utf-8")
+
+                  print("HTTP Status:", status_code)
+
+                  try:
+                      result = json.loads(body)
+                      print(
+                          "Function status:",
+                          result.get("status", "unknown")
+                      )
+
+                      if result.get("status") == "skipped":
+                          print(
+                              "SUCCESS: Workflow safely skipped."
+                          )
+                      elif result.get("status") == "success":
+                          print(
+                              "Function reported successful execution."
+                          )
+                      else:
+                          print(
+                              "Check Base44 Automation Diagnostics."
+                          )
+                  except json.JSONDecodeError:
+                      print("Non-JSON response received.")
+                      sys.exit(1)
+
+          except urllib.error.HTTPError as error:
+              print("HTTP Error:", error.code)
+              print("Request rejected by Base44.")
+              sys.exit(1)
+
+          except urllib.error.URLError as error:
+              print("Connection error:", error.reason)
+              sys.exit(1)
           PY
